@@ -1,6 +1,7 @@
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
+import { Redis } from "@upstash/redis";
 
 const app = express();
 
@@ -11,6 +12,11 @@ const IRD_BASE_URL = "https://prize.ird.gov.np/api/v1/public/winners";
 const PAGE_SIZE = 20;
 const MAX_PAGES = 30; // safety cap, same as the old fetch-winners.mjs script
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes — keeps us from hammering IRD on every visitor hit
+
+const redis = new Redis({
+  url: process.env.UPSTASH_REDIS_REST_URL,
+  token: process.env.UPSTASH_REDIS_REST_TOKEN,
+});
 
 app.use(cors({ origin: ALLOWED_ORIGIN }));
 
@@ -108,6 +114,28 @@ app.get("/api/winners/refresh", async (req, res) => {
     res.status(502).json({
       error: "Could not reach IRD's winners API. Please try again shortly.",
     });
+  }
+});
+
+// Increments and returns the total visit count (called once per real visit).
+app.post("/api/visits", async (req, res) => {
+  try {
+    const count = await redis.incr("visitCount");
+    res.json({ count });
+  } catch (err) {
+    console.error("Failed to increment visit count:", err);
+    res.status(500).json({ error: "Could not update visit count." });
+  }
+});
+
+// Just reads the current count, no side effects.
+app.get("/api/visits", async (req, res) => {
+  try {
+    const count = (await redis.get("visitCount")) || 0;
+    res.json({ count });
+  } catch (err) {
+    console.error("Failed to read visit count:", err);
+    res.status(500).json({ error: "Could not read visit count." });
   }
 });
 
